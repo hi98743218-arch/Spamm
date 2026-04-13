@@ -6,27 +6,43 @@ import os
 import time
 
 # --- الإعدادات ---
-# يمكنك وضع توكن الحساب الأساسي هنا مباشرة بين القوسين
-PRIMARY_TOKEN = "ضع_التوكن_هنا_إذا_أردت" 
-
-# جلب باقي التوكنات من Railway (إذا وجدت)
+# يمكنك وضع توكن الحساب الأساسي هنا مباشرة
+PRIMARY_TOKEN = "ضع_التوكن_هنا" 
 TOKENS_RAW = os.getenv("TOKEN")
 PREFIX = "+"
 
 class MultiAccountBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(command_prefix=PREFIX, self_bot=True, help_command=None, *args, **kwargs)
+        # إعدادات مستقلة لكل توكن
         self.spam_words = []
         self.spam_speed = 0.5
         self.kep_speed = 0.4
         self.stop_flags = {}
+        self.reaction_settings = {"state": False, "target": None, "type": None}
         self.start_time = int(time.time())
 
     async def on_ready(self):
-        print(f'✅ Connected: {self.user.name}')
+        print(f'✅ المتصل الآن: {self.user.name}')
+
+    # نظام الرياكشن التلقائي
+    async def on_message(self, message):
+        if self.reaction_settings["state"]:
+            # إذا كان الرياكشن مفعل لسيرفر أو روم محدد
+            should_react = False
+            if self.reaction_settings["type"] == "channel" and message.channel.id == self.reaction_settings["target"]:
+                should_react = True
+            elif self.reaction_settings["type"] == "server" and message.guild and message.guild.id == self.reaction_settings["target"]:
+                should_react = True
+            
+            if should_react and message.author.id != self.user.id:
+                try: await message.add_reaction("⭐") # يمكنك تغيير الايموجي هنا
+                except: pass
+
+        await self.process_commands(message)
 
     def setup_account_commands(self):
-        # --- >> أمر الهيلب (مطابق لطلبك بالسنتي) << ---
+        # --- >> الهيلب بظبط كما طلبت << ---
         @self.command()
         async def help(ctx):
             help_text = """**====================================**
@@ -88,101 +104,96 @@ class MultiAccountBot(commands.Bot):
 +stopdestroy"""
             await ctx.send(help_text)
 
-        # --- >> الحالات مع دعم الصور << ---
-        @self.command()
-        async def playing(ctx, text, image_name=None):
-            activity = discord.Game(name=text, start=self.start_time)
-            # إذا وضعت اسم صورة مسجلة في الـ Assets الخاصة بـ Application
-            if image_name:
-                activity = discord.Activity(
-                    type=discord.ActivityType.playing,
-                    name=text,
-                    assets={'large_image': image_name, 'large_text': 'Vexy Bot'},
-                    timestamps={'start': self.start_time}
-                )
-            await self.change_presence(activity=activity)
-            await ctx.send(f"🎮 {self.user.name}: Playing **{text}**")
-
+        # --- الحالات ---
         @self.command()
         async def streaming(ctx, url, *, text):
             await self.change_presence(activity=discord.Streaming(name=text, url=url, start=self.start_time))
-            await ctx.send(f"🟣 {self.user.name}: Streaming **{text}**")
+            await ctx.send(f"🟣 Streaming: {text}")
 
         @self.command()
         async def stopact(ctx):
             await self.change_presence(activity=None)
             await ctx.send("✅ Status stopped.")
 
-        # --- >> باقي الأوامر (Spam, Kep, Nuke, Clear) بنفس المنطق السابق << ---
+        # --- الرياكشن ---
+        @self.command()
+        async def reaction(ctx, mode, target_id: int = None):
+            if mode == "channel":
+                self.reaction_settings["type"] = "channel"
+                self.reaction_settings["target"] = target_id or ctx.channel.id
+            elif mode == "server":
+                self.reaction_settings["type"] = "server"
+                self.reaction_settings["target"] = target_id or ctx.guild.id
+            elif mode == "on": self.reaction_settings["state"] = True
+            elif mode == "off": self.reaction_settings["state"] = False
+            await ctx.send(f"🔄 Reaction set: {mode}")
+
+        # --- إخفاء الخاص (dm) ---
+        @self.command()
+        async def dm(ctx):
+            await ctx.send("🧹 جاري إخفاء المحادثات الخاصة...")
+            for channel in self.private_channels:
+                try: 
+                    await channel.close() # يقوم بإغلاق المحادثة (إخفائها)
+                    await asyncio.sleep(0.3)
+                except: continue
+            await ctx.send("✅ تم إخفاء جميع محادثات الخاص.")
+
+        # --- السبام والكيب ---
         @self.command()
         async def addword(ctx, *, word):
             self.spam_words.append(word)
-            await ctx.send(f"➕ Added: `{word}`")
-
-        @self.command()
-        async def spam(ctx):
-            self.stop_flags["spam"] = False
-            while not self.stop_flags.get("spam"):
-                if self.spam_words: await ctx.send(random.choice(self.spam_words))
-                await asyncio.sleep(self.spam_speed)
-
-        @self.command()
-        async def stopspam(ctx):
-            self.stop_flags["spam"] = True
-            await ctx.send("🛑 Spam stopped.")
+            await ctx.send(f"➕ Added: {word}")
 
         @self.command()
         async def kep(ctx, user: discord.Member):
             self.stop_flags["kep"] = False
             while not self.stop_flags.get("kep"):
-                msg = random.choice(self.spam_words) if self.spam_words else ".."
-                await ctx.send(f"{user.mention} {msg}")
+                word = random.choice(self.spam_words) if self.spam_words else "..."
+                await ctx.send(f"{user.mention} {word}")
                 await asyncio.sleep(self.kep_speed)
 
+        # --- التيكست (XP) ---
         @self.command()
-        async def stopkep(ctx):
-            self.stop_flags["kep"] = True
-            await ctx.send("🛑 Kep stopped.")
-
-        @self.command()
-        async def voice(ctx, channel_id: int):
-            self.stop_flags["voice"] = False
+        async def text(ctx, channel_id: int):
+            self.stop_flags["text"] = False
             channel = self.get_channel(channel_id)
-            while not self.stop_flags.get("voice"):
-                if not ctx.voice_client:
-                    try: await channel.connect()
-                    except: pass
-                await asyncio.sleep(5)
+            while not self.stop_flags.get("text"):
+                await channel.send(f"XP Boost {random.randint(100,999)}")
+                await asyncio.sleep(60)
 
+        # --- إرسال مجدول ---
         @self.command()
-        async def stopvoice(ctx):
-            self.stop_flags["voice"] = True
-            if ctx.voice_client: await ctx.voice_client.disconnect()
+        async def send(ctx, channel_id: int, delay: int, *, msg):
+            self.stop_flags["send"] = False
+            channel = self.get_channel(channel_id)
+            while not self.stop_flags.get("send"):
+                await channel.send(msg)
+                await asyncio.sleep(delay)
 
-# --- دالة التشغيل ---
+        # --- توقيف عام ---
+        @self.command()
+        async def stopact(ctx): await self.change_presence(activity=None)
+        @self.command()
+        async def stopkep(ctx): self.stop_flags["kep"] = True
+        @self.command()
+        async def stoptext(ctx): self.stop_flags["text"] = True
+        @self.command()
+        async def stopsend(ctx): self.stop_flags["send"] = True
+
+# --- تشغيل الحسابات ---
 async def start_acc(token):
-    if not token or token == "ضع_التوكن_هنا_إذا_أردت": return
+    if not token or "ضع" in token: return
     client = MultiAccountBot()
     client.setup_account_commands()
     try: await client.start(token)
-    except: print(f"❌ Failed to start token: {token[:10]}...")
+    except Exception as e: print(f"❌ Error: {e}")
 
 async def main():
     all_tokens = []
-    # إضافة التوكن الأساسي من الكود
-    if PRIMARY_TOKEN and PRIMARY_TOKEN != "ضع_التوكن_هنا_إذا_أردت":
-        all_tokens.append(PRIMARY_TOKEN)
-    
-    # إضافة التوكنات من Variables
-    if TOKENS_RAW:
-        all_tokens.extend([t.strip() for t in TOKENS_RAW.split(',')])
-    
-    if not all_tokens:
-        print("❌ No tokens provided!")
-        return
-
+    if PRIMARY_TOKEN and "ضع" not in PRIMARY_TOKEN: all_tokens.append(PRIMARY_TOKEN)
+    if TOKENS_RAW: all_tokens.extend([t.strip() for t in TOKENS_RAW.split(',')])
     await asyncio.gather(*[start_acc(token) for token in all_tokens])
 
 if __name__ == "__main__":
     asyncio.run(main())
-                
