@@ -1,15 +1,10 @@
 import discord
 from discord.ext import commands
 import asyncio
-import aiohttp
-import json
 import time
 import random
-import string
 import os
 import sys
-from datetime import datetime, timedelta
-import requests
 
 # ====================================
 # إعدادات الأداة
@@ -17,14 +12,13 @@ import requests
 TOKEN = os.getenv('TOKEN')
 PREFIX = "+"
 
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix=PREFIX, self_bot=True, intents=intents, help_command=None)
+bot = commands.Bot(command_prefix=PREFIX, self_bot=True, intents=discord.Intents.all())
+bot.remove_command('help')
 
 # ====================================
 # المتغيرات العامة
 # ====================================
 activity_start_time = None
-activity_timer_running = False
 spam_active = False
 spam_words = []
 spam_speed = 1
@@ -32,45 +26,13 @@ kep_active = False
 kep_target = None
 kep_words = []
 kep_speed = 1
-send_tasks = {}
 reaction_active = False
 reaction_channels = []
 reaction_servers = []
-voice_connection = None
-text_leveling_channel = None
+voice_client = None
+text_spam_channel = None
+send_tasks = {}
 nuke_active = False
-
-# ====================================
-# كلاس خيارات النسخ (بدون GUI)
-# ====================================
-class CloneOptions:
-    def __init__(self):
-        self.channels = True
-        self.roles = True
-        self.emojis = True
-        self.categories = True
-    
-    def set_all(self, value):
-        self.channels = value
-        self.roles = value
-        self.emojis = value
-        self.categories = value
-
-# ====================================
-# دوال مساعدة
-# ====================================
-def format_time(seconds):
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    seconds = seconds % 60
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-async def update_activity_timer():
-    global activity_start_time, activity_timer_running
-    while activity_timer_running:
-        if activity_start_time:
-            elapsed = int(time.time() - activity_start_time)
-            await asyncio.sleep(1)
 
 # ====================================
 # حدث جاهزية البوت
@@ -87,54 +49,53 @@ async def on_ready():
     """)
 
 # ====================================
-# قائمة المساعدة
+# أمر المساعدة
 # ====================================
 @bot.command(name='help', aliases=['مساعدة'])
 async def help_command(ctx):
-    help_text = f"""```ansi
-[1;36m====================================[0m
-[1;33m** اوامر المستخدمين (+)**
-[1;36m====================================[0m
+    help_text = f"""```
+====================================
+** اوامر المستخدمين (+)**
+====================================
 
-[1;32m>> الحالات:[0m
+>> الحالات:
 {PREFIX}playing <نص>
 {PREFIX}streaming <رابط> <نص>
 {PREFIX}watching <نص>
 {PREFIX}competing <نص>
 {PREFIX}listening <نص>
 {PREFIX}stopact
-[1;35m⏱️ عداد الوقت يظهر مع الحالة[0m
 
-[1;32m>> Copy Server :[0m
+>> Copy Server :
 {PREFIX}clone <ايدي_المصدر> <ايدي_الهدف> <خيار>
 الخيارات: all, channels, roles, emojis, categories
 
-[1;32m>> فويس:[0m
+>> فويس:
 {PREFIX}voice <channelID>
 {PREFIX}stopvoice
 
-[1;32m>> تيكست:[0m
+>> تيكست:
 {PREFIX}text <channelID>
 {PREFIX}stoptext
 
-[1;32m>> اوتو ريأكشن:[0m
+>> اوتو ريأكشن:
 {PREFIX}reaction channel <channelID>
 {PREFIX}reaction server <serverID>
 {PREFIX}reaction on
 {PREFIX}reaction off
 
-[1;32m>> ارسال:[0m
+>> ارسال:
 {PREFIX}send <channelID> <وقت> <رسالة>
 {PREFIX}stopsend
 
-[1;32m>> Spam:[0m
+>> Spam:
 {PREFIX}addword <كلمة>
 {PREFIX}removeword <كلمة>
 {PREFIX}spam
 {PREFIX}stopspam
 {PREFIX}speed <رقم>
 
-[1;32m>> Kep:[0m
+>> Kep:
 {PREFIX}kep @المنشن
 {PREFIX}addw <كلمة>
 {PREFIX}ad
@@ -142,12 +103,12 @@ async def help_command(ctx):
 {PREFIX}stopkep
 {PREFIX}speedk <رقم>
 
-[1;32m>> Nuke:[0m
+>> Nuke:
 {PREFIX}account <serverID> <عدد> <اسم>
 {PREFIX}bot <token> <serverID> <عدد> <كلمة>
 {PREFIX}stopnuke
 
-[1;32m>> Clear:[0m
+>> Clear:
 {PREFIX}friend
 {PREFIX}server
 {PREFIX}dm
@@ -160,100 +121,48 @@ async def help_command(ctx):
 # ====================================
 @bot.command(name='playing')
 async def playing(ctx, *, text):
-    global activity_start_time, activity_timer_running
+    global activity_start_time
     activity_start_time = time.time()
-    activity_timer_running = True
-    
     await bot.change_presence(activity=discord.Game(name=text))
-    asyncio.create_task(update_activity_timer())
-    
-    embed = discord.Embed(
-        title="✅ تم تغيير الحالة",
-        description=f"الحالة: Playing **{text}**\n⏱️ بدأ العداد",
-        color=0x00ff00
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"✅ تم تغيير الحالة إلى: Playing **{text}**")
 
 @bot.command(name='streaming')
 async def streaming(ctx, url, *, text):
-    global activity_start_time, activity_timer_running
+    global activity_start_time
     activity_start_time = time.time()
-    activity_timer_running = True
-    
     await bot.change_presence(activity=discord.Streaming(name=text, url=url))
-    asyncio.create_task(update_activity_timer())
-    
-    embed = discord.Embed(
-        title="✅ تم تغيير الحالة",
-        description=f"الحالة: Streaming **{text}**\n⏱️ بدأ العداد",
-        color=0x9146ff
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"✅ تم تغيير الحالة إلى: Streaming **{text}**")
 
 @bot.command(name='watching')
 async def watching(ctx, *, text):
-    global activity_start_time, activity_timer_running
+    global activity_start_time
     activity_start_time = time.time()
-    activity_timer_running = True
-    
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=text))
-    asyncio.create_task(update_activity_timer())
-    
-    embed = discord.Embed(
-        title="✅ تم تغيير الحالة",
-        description=f"الحالة: Watching **{text}**\n⏱️ بدأ العداد",
-        color=0x00ff00
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"✅ تم تغيير الحالة إلى: Watching **{text}**")
 
 @bot.command(name='competing')
 async def competing(ctx, *, text):
-    global activity_start_time, activity_timer_running
+    global activity_start_time
     activity_start_time = time.time()
-    activity_timer_running = True
-    
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.competing, name=text))
-    asyncio.create_task(update_activity_timer())
-    
-    embed = discord.Embed(
-        title="✅ تم تغيير الحالة",
-        description=f"الحالة: Competing in **{text}**\n⏱️ بدأ العداد",
-        color=0x00ff00
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"✅ تم تغيير الحالة إلى: Competing in **{text}**")
 
 @bot.command(name='listening')
 async def listening(ctx, *, text):
-    global activity_start_time, activity_timer_running
+    global activity_start_time
     activity_start_time = time.time()
-    activity_timer_running = True
-    
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=text))
-    asyncio.create_task(update_activity_timer())
-    
-    embed = discord.Embed(
-        title="✅ تم تغيير الحالة",
-        description=f"الحالة: Listening to **{text}**\n⏱️ بدأ العداد",
-        color=0x00ff00
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"✅ تم تغيير الحالة إلى: Listening to **{text}**")
 
 @bot.command(name='stopact')
 async def stopact(ctx):
-    global activity_timer_running, activity_start_time
-    activity_timer_running = False
+    global activity_start_time
     activity_start_time = None
     await bot.change_presence(activity=None)
-    
-    embed = discord.Embed(
-        title="⏹️ تم إيقاف الحالة",
-        description="تم إزالة الحالة وإيقاف العداد",
-        color=0xff0000
-    )
-    await ctx.send(embed=embed)
+    await ctx.send("✅ تم إزالة الحالة")
 
 # ====================================
-# أوامر النسخ
+# أمر نسخ السيرفر
 # ====================================
 @bot.command(name='clone')
 async def clone_server(ctx, source_id: int, target_id: int, option: str = "all"):
@@ -265,76 +174,52 @@ async def clone_server(ctx, source_id: int, target_id: int, option: str = "all")
             await ctx.send("❌ لم يتم العثور على أحد السيرفرات")
             return
         
-        options = CloneOptions()
-        
-        if option == "all":
-            options.set_all(True)
-        elif option == "roles":
-            options.set_all(False)
-            options.roles = True
-        elif option == "channels":
-            options.set_all(False)
-            options.channels = True
-        elif option == "emojis":
-            options.set_all(False)
-            options.emojis = True
-        elif option == "categories":
-            options.set_all(False)
-            options.categories = True
-        
         await ctx.send(f"🔄 جاري نسخ السيرفر مع خيار: {option}...")
         
         # نسخ الرتب
-        if options.roles:
-            roles = {}
+        if option in ["all", "roles"]:
             for role in reversed(source_guild.roles):
                 if role.name != "@everyone":
                     try:
-                        new_role = await target_guild.create_role(
+                        await target_guild.create_role(
                             name=role.name,
                             color=role.color,
                             hoist=role.hoist,
                             mentionable=role.mentionable,
                             permissions=role.permissions
                         )
-                        roles[role] = new_role
                         await asyncio.sleep(0.5)
                     except:
                         pass
         
         # نسخ الكاتجوري والرومات
-        if options.categories or options.channels:
+        if option in ["all", "categories", "channels"]:
             for category in source_guild.categories:
-                if options.categories:
+                if option in ["all", "categories"]:
                     try:
                         new_category = await target_guild.create_category(
                             name=category.name,
                             position=category.position
                         )
                         
-                        if options.channels:
+                        if option in ["all", "channels"]:
                             for channel in category.channels:
                                 if isinstance(channel, discord.TextChannel):
                                     await target_guild.create_text_channel(
                                         name=channel.name,
-                                        category=new_category,
-                                        topic=channel.topic,
-                                        nsfw=channel.nsfw,
-                                        slowmode_delay=channel.slowmode_delay
+                                        category=new_category
                                     )
                                 elif isinstance(channel, discord.VoiceChannel):
                                     await target_guild.create_voice_channel(
                                         name=channel.name,
-                                        category=new_category,
-                                        bitrate=channel.bitrate,
-                                        user_limit=channel.user_limit
+                                        category=new_category
                                     )
                                 await asyncio.sleep(0.5)
-                    except Exception as e:
-                        print(f"Error copying category: {e}")
+                    except:
+                        pass
         
         # نسخ الإيموجي
-        if options.emojis:
+        if option in ["all", "emojis"]:
             for emoji in source_guild.emojis:
                 try:
                     emoji_data = await emoji.read()
@@ -346,12 +231,7 @@ async def clone_server(ctx, source_id: int, target_id: int, option: str = "all")
                 except:
                     pass
         
-        embed = discord.Embed(
-            title="✅ تم نسخ السيرفر بنجاح",
-            description=f"من: {source_guild.name}\nإلى: {target_guild.name}\nالخيار: {option}",
-            color=0x00ff00
-        )
-        await ctx.send(embed=embed)
+        await ctx.send(f"✅ تم نسخ السيرفر بنجاح")
         
     except Exception as e:
         await ctx.send(f"❌ حدث خطأ: {str(e)}")
@@ -361,64 +241,67 @@ async def clone_server(ctx, source_id: int, target_id: int, option: str = "all")
 # ====================================
 @bot.command(name='voice')
 async def voice_join(ctx, channel_id: int):
-    global voice_connection
+    global voice_client
+    
+    if voice_client:
+        await ctx.send("❌ أنت بالفعل في روم صوتي")
+        return
+    
+    channel = bot.get_channel(channel_id)
+    if not channel or not isinstance(channel, discord.VoiceChannel):
+        await ctx.send("❌ لم يتم العثور على الروم الصوتي")
+        return
+    
     try:
-        channel = bot.get_channel(channel_id)
-        if channel and isinstance(channel, discord.VoiceChannel):
-            voice_connection = await channel.connect()
-            await ctx.send(f"✅ تم الانضمام إلى روم: {channel.name}")
-        else:
-            await ctx.send("❌ لم يتم العثور على الروم الصوتي")
+        voice_client = await channel.connect()
+        await ctx.send(f"✅ تم الدخول إلى الروم: {channel.name}")
     except Exception as e:
-        await ctx.send(f"❌ حدث خطأ: {str(e)}")
+        await ctx.send(f"❌ فشل الدخول: {str(e)}")
 
 @bot.command(name='stopvoice')
 async def voice_leave(ctx):
-    global voice_connection
-    try:
-        if voice_connection:
-            await voice_connection.disconnect()
-            voice_connection = None
-            await ctx.send("✅ تم الخروج من الروم الصوتي")
-        else:
-            await ctx.send("❌ لست في روم صوتي")
-    except Exception as e:
-        await ctx.send(f"❌ حدث خطأ: {str(e)}")
+    global voice_client
+    
+    if voice_client:
+        await voice_client.disconnect()
+        voice_client = None
+        await ctx.send("✅ تم الخروج من الروم الصوتي")
+    else:
+        await ctx.send("❌ لست في روم صوتي")
 
 # ====================================
-# أوامر رفع مستوى التكست
+# أوامر التكست
 # ====================================
 @bot.command(name='text')
 async def text_level(ctx, channel_id: int):
-    global text_leveling_channel
-    try:
-        channel = bot.get_channel(channel_id)
-        if channel and isinstance(channel, discord.TextChannel):
-            text_leveling_channel = channel
-            await ctx.send(f"✅ بدأ رفع المستوى في روم: {channel.name}")
-            
-            while text_leveling_channel:
-                try:
-                    await channel.send(f"Leveling up... {random.randint(1000, 9999)}")
-                    await asyncio.sleep(random.uniform(3, 7))
-                except:
-                    break
-        else:
-            await ctx.send("❌ لم يتم العثور على الروم النصي")
-    except Exception as e:
-        await ctx.send(f"❌ حدث خطأ: {str(e)}")
+    global text_spam_channel
+    
+    channel = bot.get_channel(channel_id)
+    if not channel or not isinstance(channel, discord.TextChannel):
+        await ctx.send("❌ لم يتم العثور على الروم النصي")
+        return
+    
+    text_spam_channel = channel
+    await ctx.send(f"✅ بدأ رفع المستوى في: {channel.name}")
+    
+    while text_spam_channel:
+        try:
+            await channel.send(f"Level up {random.randint(1000, 9999)}")
+            await asyncio.sleep(random.uniform(3, 7))
+        except:
+            break
 
 @bot.command(name='stoptext')
 async def stop_text(ctx):
-    global text_leveling_channel
-    text_leveling_channel = None
+    global text_spam_channel
+    text_spam_channel = None
     await ctx.send("✅ تم إيقاف رفع المستوى")
 
 # ====================================
-# أوامر الريأكشن التلقائي
+# أوامر الريأكشن
 # ====================================
 @bot.command(name='reaction')
-async def reaction_command(ctx, action=None, target_id: int = None):
+async def reaction_cmd(ctx, action=None, target_id: int = None):
     global reaction_active, reaction_channels, reaction_servers
     
     if action == 'channel' and target_id:
@@ -443,7 +326,7 @@ async def reaction_command(ctx, action=None, target_id: int = None):
     
     elif action == 'off':
         reaction_active = False
-        await ctx.send("⏸️ تم إيقاف الريأكشن التلقائي")
+        await ctx.send("✅ تم إيقاف الريأكشن التلقائي")
 
 @bot.event
 async def on_message(message):
@@ -454,7 +337,7 @@ async def on_message(message):
         if message.channel.id in reaction_channels or (message.guild and message.guild.id in reaction_servers):
             try:
                 await message.add_reaction("👍")
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.3)
                 await message.add_reaction("❤️")
             except:
                 pass
@@ -465,18 +348,18 @@ async def on_message(message):
 # أوامر الإرسال المجدول
 # ====================================
 @bot.command(name='send')
-async def scheduled_send(ctx, channel_id: int, interval: int, *, message_text):
+async def scheduled_send(ctx, channel_id: int, interval: int, *, msg_text):
     channel = bot.get_channel(channel_id)
     if not channel:
         await ctx.send("❌ لم يتم العثور على الروم")
         return
     
-    task_id = f"{channel_id}_{int(time.time())}"
+    task_id = str(channel_id)
     
     async def send_loop():
         while task_id in send_tasks:
             try:
-                await channel.send(message_text)
+                await channel.send(msg_text)
                 await asyncio.sleep(interval)
             except:
                 break
@@ -486,7 +369,7 @@ async def scheduled_send(ctx, channel_id: int, interval: int, *, message_text):
 
 @bot.command(name='stopsend')
 async def stop_scheduled_send(ctx):
-    for task_id, task in send_tasks.items():
+    for task in send_tasks.values():
         task.cancel()
     send_tasks.clear()
     await ctx.send("✅ تم إيقاف جميع الإرسالات المجدولة")
@@ -537,26 +420,21 @@ async def stop_spam(ctx):
 async def set_spam_speed(ctx, speed: float):
     global spam_speed
     spam_speed = speed
-    await ctx.send(f"✅ تم تغيير سرعة السبام إلى {speed} ثانية")
+    await ctx.send(f"✅ تم تغيير السرعة إلى {speed} ثانية")
 
 # ====================================
-# أوامر الكيب (Ghost Ping)
+# أوامر الكيب
 # ====================================
 @bot.command(name='kep')
-async def kep_target(ctx, user: discord.User):
+async def kep_cmd(ctx, user: discord.User):
     global kep_target, kep_active
     kep_target = user
     kep_active = True
-    
-    embed = discord.Embed(
-        title="✅ بدأ الكيب",
-        description=f"المستهدف: {user.mention}",
-        color=0x00ff00
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"✅ بدأ الكيب على: {user.mention}")
     
     while kep_active:
-        for word in kep_words if kep_words else ["."]:
+        words = kep_words if kep_words else ["."]
+        for word in words:
             if not kep_active:
                 break
             try:
@@ -569,74 +447,38 @@ async def kep_target(ctx, user: discord.User):
 @bot.command(name='addw')
 async def add_kep_word(ctx, *, word):
     kep_words.append(word)
-    embed = discord.Embed(
-        title="✅ تمت الإضافة",
-        description=f"الكلمة: {word}",
-        color=0x00ff00
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"✅ تم إضافة الكلمة: {word}")
 
 @bot.command(name='ad')
 async def list_kep_words(ctx):
     if kep_words:
-        words_list = "\n".join([f"• {w}" for w in kep_words])
-        embed = discord.Embed(
-            title="📝 قائمة الكلمات",
-            description=words_list,
-            color=0x3498db
-        )
-        await ctx.send(embed=embed)
+        words = "\n".join([f"• {w}" for w in kep_words])
+        await ctx.send(f"📝 الكلمات:\n{words}")
     else:
-        embed = discord.Embed(
-            title="📝 قائمة الكلمات",
-            description="لا توجد كلمات مضافة",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
+        await ctx.send("📝 لا توجد كلمات")
 
 @bot.command(name='dele')
 async def delete_kep_word(ctx, *, word):
     if word in kep_words:
         kep_words.remove(word)
-        embed = discord.Embed(
-            title="✅ تم الحذف",
-            description=f"الكلمة: {word}",
-            color=0x00ff00
-        )
-        await ctx.send(embed=embed)
+        await ctx.send(f"✅ تم حذف: {word}")
     else:
-        embed = discord.Embed(
-            title="❌ خطأ",
-            description="الكلمة غير موجودة في القائمة",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
+        await ctx.send("❌ الكلمة غير موجودة")
 
 @bot.command(name='stopkep')
 async def stop_kep(ctx):
-    global kep_active, kep_target
+    global kep_active
     kep_active = False
-    kep_target = None
-    embed = discord.Embed(
-        title="⏹️ تم الإيقاف",
-        description="تم إيقاف الكيب",
-        color=0xff0000
-    )
-    await ctx.send(embed=embed)
+    await ctx.send("✅ تم إيقاف الكيب")
 
 @bot.command(name='speedk')
 async def set_kep_speed(ctx, speed: float):
     global kep_speed
     kep_speed = speed
-    embed = discord.Embed(
-        title="⚡ تم تغيير السرعة",
-        description=f"السرعة الجديدة: {speed} ثانية",
-        color=0x00ff00
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"✅ تم تغيير السرعة إلى {speed} ثانية")
 
 # ====================================
-# أوامر التدمير (Nuke)
+# أوامر التدمير
 # ====================================
 @bot.command(name='account')
 async def nuke_account(ctx, server_id: int, count: int, *, name):
@@ -644,108 +486,62 @@ async def nuke_account(ctx, server_id: int, count: int, *, name):
     guild = bot.get_guild(server_id)
     
     if not guild:
-        embed = discord.Embed(
-            title="❌ خطأ",
-            description="لم يتم العثور على السيرفر",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
+        await ctx.send("❌ لم يتم العثور على السيرفر")
         return
     
     nuke_active = True
-    
-    embed = discord.Embed(
-        title="💣 بدأ التدمير",
-        description=f"السيرفر: {guild.name}\nالعدد: {count}\nالاسم: {name}",
-        color=0xff5500
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"💣 بدأ تدمير السيرفر: {guild.name}")
     
     try:
-        # حذف جميع الرومات
-        deleted_channels = 0
+        # حذف الرومات
         for channel in guild.channels:
             if not nuke_active:
                 break
             try:
                 await channel.delete()
-                deleted_channels += 1
                 await asyncio.sleep(0.3)
             except:
                 pass
         
-        # حذف جميع الرتب (ما عدا @everyone)
-        deleted_roles = 0
+        # حذف الرتب
         for role in guild.roles:
             if not nuke_active or role.name == "@everyone":
                 continue
             try:
                 await role.delete()
-                deleted_roles += 1
                 await asyncio.sleep(0.3)
             except:
                 pass
         
         # إنشاء رومات جديدة
-        created_channels = 0
         for i in range(count):
             if not nuke_active:
                 break
             try:
-                await guild.create_text_channel(f"{name}-{i+1}")
-                created_channels += 1
+                ch = await guild.create_text_channel(f"{name}-{i+1}")
+                await ch.send(f"@everyone NUKED BY {bot.user.name}")
                 await asyncio.sleep(0.3)
             except:
                 pass
         
         # إنشاء رتب جديدة
-        created_roles = 0
         for i in range(count):
             if not nuke_active:
                 break
             try:
                 await guild.create_role(name=f"{name}-{i+1}")
-                created_roles += 1
                 await asyncio.sleep(0.3)
             except:
                 pass
         
-        # سبام في الرومات الجديدة
-        spam_count = 0
-        for channel in guild.text_channels:
-            if not nuke_active:
-                break
-            try:
-                for _ in range(5):
-                    await channel.send(f"@everyone {name} NUKED BY {bot.user.name}")
-                    spam_count += 1
-                    await asyncio.sleep(0.5)
-            except:
-                pass
-        
-        embed = discord.Embed(
-            title="✅ تم التدمير بنجاح",
-            description=f"الرومات المحذوفة: {deleted_channels}\nالرتب المحذوفة: {deleted_roles}\nالرومات المنشأة: {created_channels}\nالرتب المنشأة: {created_roles}\nالرسائل المرسلة: {spam_count}",
-            color=0x00ff00
-        )
-        await ctx.send(embed=embed)
+        await ctx.send("✅ تم التدمير بنجاح")
         
     except Exception as e:
-        embed = discord.Embed(
-            title="❌ خطأ",
-            description=f"حدث خطأ أثناء التدمير: {str(e)}",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
+        await ctx.send(f"❌ حدث خطأ: {str(e)}")
 
 @bot.command(name='bot')
-async def nuke_bot(ctx, bot_token: str, server_id: int, count: int, *, name):
-    embed = discord.Embed(
-        title="🔄 جاري التدمير",
-        description="يتم التدمير باستخدام بوت خارجي...",
-        color=0x3498db
-    )
-    await ctx.send(embed=embed)
+async def nuke_with_bot(ctx, bot_token: str, server_id: int, count: int, *, name):
+    await ctx.send("🔄 جاري التدمير باستخدام البوت...")
     
     try:
         bot_client = discord.Client(intents=discord.Intents.all())
@@ -754,7 +550,6 @@ async def nuke_bot(ctx, bot_token: str, server_id: int, count: int, *, name):
         async def on_ready():
             guild = bot_client.get_guild(server_id)
             if guild:
-                # حذف الرومات
                 for channel in guild.channels:
                     try:
                         await channel.delete()
@@ -762,7 +557,6 @@ async def nuke_bot(ctx, bot_token: str, server_id: int, count: int, *, name):
                     except:
                         pass
                 
-                # حذف الرتب
                 for role in guild.roles:
                     if role.name != "@everyone":
                         try:
@@ -771,71 +565,41 @@ async def nuke_bot(ctx, bot_token: str, server_id: int, count: int, *, name):
                         except:
                             pass
                 
-                # إنشاء رومات جديدة
                 for i in range(count):
                     try:
-                        channel = await guild.create_text_channel(f"{name}-{i+1}")
-                        await channel.send(f"@everyone NUKED BY BOT")
+                        ch = await guild.create_text_channel(f"{name}-{i+1}")
+                        await ch.send("@everyone NUKED BY BOT")
                         await asyncio.sleep(0.3)
                     except:
                         pass
                 
-                # إنشاء رتب جديدة
                 for i in range(count):
                     try:
                         await guild.create_role(name=f"{name}-{i+1}")
                         await asyncio.sleep(0.3)
                     except:
                         pass
-                
-                # تغيير اسم السيرفر
-                try:
-                    await guild.edit(name=f"NUKED BY {name}")
-                except:
-                    pass
             
             await bot_client.close()
         
         await bot_client.start(bot_token)
-        
-        embed = discord.Embed(
-            title="✅ تم التدمير",
-            description="تم تدمير السيرفر بنجاح باستخدام البوت",
-            color=0x00ff00
-        )
-        await ctx.send(embed=embed)
+        await ctx.send("✅ تم التدمير بنجاح")
         
     except Exception as e:
-        embed = discord.Embed(
-            title="❌ خطأ",
-            description=f"فشل التدمير: {str(e)}",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
+        await ctx.send(f"❌ فشل التدمير: {str(e)}")
 
 @bot.command(name='stopnuke')
 async def stop_nuke(ctx):
     global nuke_active
     nuke_active = False
-    embed = discord.Embed(
-        title="⏹️ تم الإيقاف",
-        description="تم إيقاف عملية التدمير",
-        color=0xff0000
-    )
-    await ctx.send(embed=embed)
+    await ctx.send("✅ تم إيقاف التدمير")
 
 # ====================================
-# أوامر التنظيف (Clear)
+# أوامر التنظيف
 # ====================================
 @bot.command(name='friend')
 async def clear_friends(ctx):
-    embed = discord.Embed(
-        title="🔄 جاري التنظيف",
-        description="جاري حذف جميع الأصدقاء...",
-        color=0x3498db
-    )
-    msg = await ctx.send(embed=embed)
-    
+    await ctx.send("🔄 جاري حذف الأصدقاء...")
     count = 0
     for friend in bot.user.friends:
         try:
@@ -844,159 +608,77 @@ async def clear_friends(ctx):
             await asyncio.sleep(1)
         except:
             pass
-    
-    embed = discord.Embed(
-        title="✅ تم التنظيف",
-        description=f"تم حذف {count} صديق",
-        color=0x00ff00
-    )
-    await msg.edit(embed=embed)
+    await ctx.send(f"✅ تم حذف {count} صديق")
 
 @bot.command(name='server')
 async def leave_servers(ctx):
-    embed = discord.Embed(
-        title="🔄 جاري الخروج",
-        description="جاري الخروج من جميع السيرفرات...",
-        color=0x3498db
-    )
-    msg = await ctx.send(embed=embed)
-    
+    await ctx.send("🔄 جاري الخروج من السيرفرات...")
     count = 0
-    guilds_to_leave = [g for g in bot.guilds if g.owner_id != bot.user.id]
-    
-    for guild in guilds_to_leave:
-        try:
-            await guild.leave()
-            count += 1
-            await asyncio.sleep(1)
-        except:
-            pass
-    
-    embed = discord.Embed(
-        title="✅ تم الخروج",
-        description=f"تم الخروج من {count} سيرفر",
-        color=0x00ff00
-    )
-    await msg.edit(embed=embed)
+    for guild in bot.guilds:
+        if guild.owner_id != bot.user.id:
+            try:
+                await guild.leave()
+                count += 1
+                await asyncio.sleep(1)
+            except:
+                pass
+    await ctx.send(f"✅ تم الخروج من {count} سيرفر")
 
 @bot.command(name='dm')
 async def clear_dms(ctx):
-    embed = discord.Embed(
-        title="🔄 جاري الحذف",
-        description="جاري حذف جميع المحادثات الخاصة...",
-        color=0x3498db
-    )
-    msg = await ctx.send(embed=embed)
-    
+    await ctx.send("🔄 جاري حذف المحادثات...")
     count = 0
     for channel in bot.private_channels:
         if isinstance(channel, discord.DMChannel):
             try:
-                async for message in channel.history(limit=1000):
-                    if message.author == bot.user:
-                        await message.delete()
+                async for msg in channel.history(limit=100):
+                    if msg.author == bot.user:
+                        await msg.delete()
                         await asyncio.sleep(0.3)
                 count += 1
             except:
                 pass
-    
-    embed = discord.Embed(
-        title="✅ تم الحذف",
-        description=f"تم تنظيف {count} محادثة",
-        color=0x00ff00
-    )
-    await msg.edit(embed=embed)
+    await ctx.send(f"✅ تم تنظيف {count} محادثة")
 
 @bot.command(name='all')
 async def clear_all(ctx):
-    embed = discord.Embed(
-        title="🔄 جاري التنظيف الشامل",
-        description="جاري تنظيف كل شيء...\n⏳ الأصدقاء\n⏳ السيرفرات\n⏳ المحادثات",
-        color=0x3498db
-    )
-    msg = await ctx.send(embed=embed)
+    await ctx.send("🔄 جاري تنظيف كل شيء...")
     
     # حذف الأصدقاء
-    friend_count = 0
+    fc = 0
     for friend in bot.user.friends:
         try:
             await friend.remove_friend()
-            friend_count += 1
+            fc += 1
             await asyncio.sleep(1)
         except:
             pass
     
     # الخروج من السيرفرات
-    server_count = 0
+    sc = 0
     for guild in bot.guilds:
         if guild.owner_id != bot.user.id:
             try:
                 await guild.leave()
-                server_count += 1
+                sc += 1
                 await asyncio.sleep(1)
             except:
                 pass
     
     # حذف المحادثات
-    dm_count = 0
+    dc = 0
     for channel in bot.private_channels:
         if isinstance(channel, discord.DMChannel):
             try:
-                async for message in channel.history(limit=1000):
-                    if message.author == bot.user:
-                        await message.delete()
+                async for msg in channel.history(limit=100):
+                    if msg.author == bot.user:
+                        await msg.delete()
                         await asyncio.sleep(0.3)
-                dm_count += 1
+                dc += 1
             except:
                 pass
     
-    # مغادرة السيرفرات المملوكة
-    owned_count = 0
-    for guild in bot.guilds:
-        if guild.owner_id == bot.user.id:
-            try:
-                await guild.delete()
-                owned_count += 1
-                await asyncio.sleep(1)
-            except:
-                pass
-    
-    embed = discord.Embed(
-        title="✅ تم التنظيف الشامل",
-        description=f"""
-        **الإحصائيات:**
-        👥 الأصدقاء المحذوفين: {friend_count}
-        🌐 السيرفرات المغادرة: {server_count}
-        💬 المحادثات المنظفة: {dm_count}
-        🗑️ السيرفرات المحذوفة: {owned_count}
-        """,
-        color=0x00ff00
-    )
-    await msg.edit(embed=embed)
-
-# ====================================
-# معالجة الأخطاء
-# ====================================
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument):
-        embed = discord.Embed(
-            title="❌ خطأ في الاستخدام",
-            description="ينقص بعض المتطلبات للأمر",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
-    elif isinstance(error, commands.BadArgument):
-        embed = discord.Embed(
-            title="❌ خطأ في المدخلات",
-            description="تأكد من صحة المدخلات (مثال: الآيدي يجب أن يكون رقماً)",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
-    elif isinstance(error, commands.CommandNotFound):
-        pass
-    else:
-        print(f"Error: {error}")
+    await ctx.send(f"✅ تم التنظيف:\n👥 أصدقاء: {fc}\n🌐 سيرفرات: {sc}\n💬 محادثات: {dc}")
 
 # ====================================
 # تشغيل البوت
@@ -1010,6 +692,6 @@ if __name__ == "__main__":
         print("🔄 جاري تشغيل البوت...")
         bot.run(TOKEN)
     except discord.LoginFailure:
-        print("❌ التوكن غير صالح أو منتهي الصلاحية")
+        print("❌ التوكن غير صالح")
     except Exception as e:
         print(f"❌ حدث خطأ: {str(e)}")
