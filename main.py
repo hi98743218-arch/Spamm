@@ -8,16 +8,13 @@ import random
 import string
 import os
 import sys
-import threading
-import tkinter as tk
-from tkinter import ttk, BooleanVar
 from datetime import datetime, timedelta
 import requests
 
 # ====================================
 # إعدادات الأداة
 # ====================================
-TOKEN = os.getenv('TOKEN')  # التوكن من متغيرات البيئة
+TOKEN = os.getenv('TOKEN')
 PREFIX = "+"
 
 intents = discord.Intents.all()
@@ -42,85 +39,22 @@ reaction_servers = []
 voice_connection = None
 text_leveling_channel = None
 nuke_active = False
-clone_options = {}
 
 # ====================================
-# كلاس واجهة النسخ
+# كلاس خيارات النسخ (بدون GUI)
 # ====================================
-class CloneGUI:
-    def __init__(self, source_name, target_name):
-        self.source_name = source_name
-        self.target_name = target_name
-        self.result = None
-        self.create_window()
+class CloneOptions:
+    def __init__(self):
+        self.channels = True
+        self.roles = True
+        self.emojis = True
+        self.categories = True
     
-    def create_window(self):
-        self.root = tk.Tk()
-        self.root.title("Clone Server Options")
-        self.root.geometry("400x500")
-        self.root.configure(bg='#2c2f33')
-        
-        title = tk.Label(self.root, text="خيارات نسخ السيرفر", 
-                        font=('Arial', 16, 'bold'), bg='#2c2f33', fg='white')
-        title.pack(pady=20)
-        
-        info_frame = tk.Frame(self.root, bg='#23272a')
-        info_frame.pack(pady=10, padx=20, fill='x')
-        
-        tk.Label(info_frame, text=f"من: {self.source_name}", 
-                bg='#23272a', fg='#7289da').pack()
-        tk.Label(info_frame, text=f"إلى: {self.target_name}", 
-                bg='#23272a', fg='#7289da').pack()
-        
-        options_frame = tk.Frame(self.root, bg='#2c2f33')
-        options_frame.pack(pady=20)
-        
-        self.channels_var = BooleanVar(value=True)
-        self.roles_var = BooleanVar(value=True)
-        self.emojis_var = BooleanVar(value=True)
-        self.categories_var = BooleanVar(value=True)
-        self.all_var = BooleanVar(value=False)
-        
-        ttk.Checkbutton(options_frame, text="نسخ الرومات", 
-                       variable=self.channels_var).pack(anchor='w', pady=5)
-        ttk.Checkbutton(options_frame, text="نسخ الرتب", 
-                       variable=self.roles_var).pack(anchor='w', pady=5)
-        ttk.Checkbutton(options_frame, text="نسخ الإيموجي", 
-                       variable=self.emojis_var).pack(anchor='w', pady=5)
-        ttk.Checkbutton(options_frame, text="نسخ الكاتجوري", 
-                       variable=self.categories_var).pack(anchor='w', pady=5)
-        ttk.Checkbutton(options_frame, text="نسخ الكل", 
-                       variable=self.all_var, command=self.toggle_all).pack(anchor='w', pady=5)
-        
-        btn_frame = tk.Frame(self.root, bg='#2c2f33')
-        btn_frame.pack(pady=20)
-        
-        tk.Button(btn_frame, text="بدء النسخ", command=self.start_clone,
-                 bg='#43b581', fg='white', padx=20, font=('Arial', 12)).pack()
-        
-        self.root.mainloop()
-    
-    def toggle_all(self):
-        if self.all_var.get():
-            self.channels_var.set(True)
-            self.roles_var.set(True)
-            self.emojis_var.set(True)
-            self.categories_var.set(True)
-        else:
-            self.channels_var.set(False)
-            self.roles_var.set(False)
-            self.emojis_var.set(False)
-            self.categories_var.set(False)
-    
-    def start_clone(self):
-        self.result = {
-            'channels': self.channels_var.get(),
-            'roles': self.roles_var.get(),
-            'emojis': self.emojis_var.get(),
-            'categories': self.categories_var.get()
-        }
-        self.root.quit()
-        self.root.destroy()
+    def set_all(self, value):
+        self.channels = value
+        self.roles = value
+        self.emojis = value
+        self.categories = value
 
 # ====================================
 # دوال مساعدة
@@ -136,7 +70,6 @@ async def update_activity_timer():
     while activity_timer_running:
         if activity_start_time:
             elapsed = int(time.time() - activity_start_time)
-            # تحديث الحالة مع الوقت
             await asyncio.sleep(1)
 
 # ====================================
@@ -164,7 +97,7 @@ async def help_command(ctx):
 [1;36m====================================[0m
 
 [1;32m>> الحالات:[0m
-{PREFIX}playing <نص> <اسم_الصورة>
+{PREFIX}playing <نص>
 {PREFIX}streaming <رابط> <نص>
 {PREFIX}watching <نص>
 {PREFIX}competing <نص>
@@ -173,8 +106,8 @@ async def help_command(ctx):
 [1;35m⏱️ عداد الوقت يظهر مع الحالة[0m
 
 [1;32m>> Copy Server :[0m
-{PREFIX}clone <ايدي_المصدر> <ايدي_الهدف>
-(واجهة GUI مع خيارات متعددة)
+{PREFIX}clone <ايدي_المصدر> <ايدي_الهدف> <خيار>
+الخيارات: all, channels, roles, emojis, categories
 
 [1;32m>> فويس:[0m
 {PREFIX}voice <channelID>
@@ -189,10 +122,9 @@ async def help_command(ctx):
 {PREFIX}reaction server <serverID>
 {PREFIX}reaction on
 {PREFIX}reaction off
-{PREFIX}stopreaction
 
 [1;32m>> ارسال:[0m
-{PREFIX}send <channelID> <وقت_بالثواني> <رسالة>
+{PREFIX}send <channelID> <وقت> <رسالة>
 {PREFIX}stopsend
 
 [1;32m>> Spam:[0m
@@ -220,7 +152,6 @@ async def help_command(ctx):
 {PREFIX}server
 {PREFIX}dm
 {PREFIX}all
-{PREFIX}stopdestroy
 ```"""
     await ctx.send(help_text)
 
@@ -325,7 +256,7 @@ async def stopact(ctx):
 # أوامر النسخ
 # ====================================
 @bot.command(name='clone')
-async def clone_server(ctx, source_id: int, target_id: int):
+async def clone_server(ctx, source_id: int, target_id: int, option: str = "all"):
     try:
         source_guild = bot.get_guild(source_id)
         target_guild = bot.get_guild(target_id)
@@ -334,17 +265,27 @@ async def clone_server(ctx, source_id: int, target_id: int):
             await ctx.send("❌ لم يتم العثور على أحد السيرفرات")
             return
         
-        # فتح واجهة GUI
-        gui = CloneGUI(source_guild.name, target_guild.name)
+        options = CloneOptions()
         
-        if not gui.result:
-            await ctx.send("❌ تم إلغاء عملية النسخ")
-            return
+        if option == "all":
+            options.set_all(True)
+        elif option == "roles":
+            options.set_all(False)
+            options.roles = True
+        elif option == "channels":
+            options.set_all(False)
+            options.channels = True
+        elif option == "emojis":
+            options.set_all(False)
+            options.emojis = True
+        elif option == "categories":
+            options.set_all(False)
+            options.categories = True
         
-        await ctx.send("🔄 جاري نسخ السيرفر...")
+        await ctx.send(f"🔄 جاري نسخ السيرفر مع خيار: {option}...")
         
         # نسخ الرتب
-        if gui.result['roles']:
+        if options.roles:
             roles = {}
             for role in reversed(source_guild.roles):
                 if role.name != "@everyone":
@@ -362,17 +303,16 @@ async def clone_server(ctx, source_id: int, target_id: int):
                         pass
         
         # نسخ الكاتجوري والرومات
-        if gui.result['categories'] or gui.result['channels']:
+        if options.categories or options.channels:
             for category in source_guild.categories:
-                if gui.result['categories']:
+                if options.categories:
                     try:
                         new_category = await target_guild.create_category(
                             name=category.name,
                             position=category.position
                         )
                         
-                        # نسخ الرومات داخل الكاتجوري
-                        if gui.result['channels']:
+                        if options.channels:
                             for channel in category.channels:
                                 if isinstance(channel, discord.TextChannel):
                                     await target_guild.create_text_channel(
@@ -394,7 +334,7 @@ async def clone_server(ctx, source_id: int, target_id: int):
                         print(f"Error copying category: {e}")
         
         # نسخ الإيموجي
-        if gui.result['emojis']:
+        if options.emojis:
             for emoji in source_guild.emojis:
                 try:
                     emoji_data = await emoji.read()
@@ -408,7 +348,7 @@ async def clone_server(ctx, source_id: int, target_id: int):
         
         embed = discord.Embed(
             title="✅ تم نسخ السيرفر بنجاح",
-            description=f"من: {source_guild.name}\nإلى: {target_guild.name}",
+            description=f"من: {source_guild.name}\nإلى: {target_guild.name}\nالخيار: {option}",
             color=0x00ff00
         )
         await ctx.send(embed=embed)
@@ -457,7 +397,6 @@ async def text_level(ctx, channel_id: int):
             text_leveling_channel = channel
             await ctx.send(f"✅ بدأ رفع المستوى في روم: {channel.name}")
             
-            # إرسال رسائل لرفع المستوى
             while text_leveling_channel:
                 try:
                     await channel.send(f"Leveling up... {random.randint(1000, 9999)}")
@@ -505,15 +444,6 @@ async def reaction_command(ctx, action=None, target_id: int = None):
     elif action == 'off':
         reaction_active = False
         await ctx.send("⏸️ تم إيقاف الريأكشن التلقائي")
-    
-    elif action == 'stop':
-        reaction_active = False
-        reaction_channels.clear()
-        reaction_servers.clear()
-        await ctx.send("⏹️ تم إيقاف وحذف جميع إعدادات الريأكشن")
-    
-    else:
-        await ctx.send("❌ استخدام خاطئ: +reaction [channel/server/on/off/stop] [id]")
 
 @bot.event
 async def on_message(message):
@@ -521,7 +451,7 @@ async def on_message(message):
         return
     
     if reaction_active:
-        if message.channel.id in reaction_channels or message.guild.id in reaction_servers:
+        if message.channel.id in reaction_channels or (message.guild and message.guild.id in reaction_servers):
             try:
                 await message.add_reaction("👍")
                 await asyncio.sleep(0.5)
@@ -612,7 +542,6 @@ async def set_spam_speed(ctx, speed: float):
 # ====================================
 # أوامر الكيب (Ghost Ping)
 # ====================================
-
 @bot.command(name='kep')
 async def kep_target(ctx, user: discord.User):
     global kep_target, kep_active
@@ -709,7 +638,6 @@ async def set_kep_speed(ctx, speed: float):
 # ====================================
 # أوامر التدمير (Nuke)
 # ====================================
-
 @bot.command(name='account')
 async def nuke_account(ctx, server_id: int, count: int, *, name):
     global nuke_active
@@ -899,7 +827,6 @@ async def stop_nuke(ctx):
 # ====================================
 # أوامر التنظيف (Clear)
 # ====================================
-
 @bot.command(name='friend')
 async def clear_friends(ctx):
     embed = discord.Embed(
@@ -965,7 +892,6 @@ async def clear_dms(ctx):
     for channel in bot.private_channels:
         if isinstance(channel, discord.DMChannel):
             try:
-                # حذف جميع الرسائل في المحادثة
                 async for message in channel.history(limit=1000):
                     if message.author == bot.user:
                         await message.delete()
@@ -1048,38 +974,9 @@ async def clear_all(ctx):
     )
     await msg.edit(embed=embed)
 
-@bot.command(name='stopdestroy')
-async def stop_destroy(ctx):
-    global nuke_active, spam_active, kep_active
-    nuke_active = False
-    spam_active = False
-    kep_active = False
-    
-    embed = discord.Embed(
-        title="⏹️ تم الإيقاف",
-        description="تم إيقاف جميع عمليات التدمير والسبام",
-        color=0xff0000
-    )
-    await ctx.send(embed=embed)
-
-# ====================================
-# حدث حذف الرسالة (للكيب)
-# ====================================
-
-@bot.event
-async def on_message_delete(message):
-    if kep_active and kep_target and message.author == bot.user:
-        if kep_target.mention in message.content:
-            try:
-                # إعادة إرسال الرسالة المحذوفة
-                await message.channel.send(message.content)
-            except:
-                pass
-
 # ====================================
 # معالجة الأخطاء
 # ====================================
-
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.MissingRequiredArgument):
@@ -1104,7 +1001,6 @@ async def on_command_error(ctx, error):
 # ====================================
 # تشغيل البوت
 # ====================================
-
 if __name__ == "__main__":
     if not TOKEN:
         print("❌ الرجاء وضع التوكن في متغيرات البيئة TOKEN")
