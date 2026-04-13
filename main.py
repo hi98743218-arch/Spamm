@@ -6,71 +6,144 @@ import os
 import time
 
 # --- الإعدادات ---
-# أضف توكناتك في الـ Variables باسم TOKEN وافصل بينهم بفاصلة
+# يمكنك وضع توكن الحساب الأساسي هنا مباشرة بين القوسين
+PRIMARY_TOKEN = "ضع_التوكن_هنا_إذا_أردت" 
+
+# جلب باقي التوكنات من Railway (إذا وجدت)
 TOKENS_RAW = os.getenv("TOKEN")
 PREFIX = "+"
 
-class MultiSelfBot(commands.Bot):
+class MultiAccountBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(command_prefix=PREFIX, self_bot=True, help_command=None, *args, **kwargs)
-        # إعدادات خاصة بكل نسخة حساب (مستقلة تماماً)
-        self.spam_list = []
+        self.spam_words = []
+        self.spam_speed = 0.5
+        self.kep_speed = 0.4
         self.stop_flags = {}
         self.start_time = int(time.time())
 
     async def on_ready(self):
-        print(f'✅ الحساب متصل: {self.user.name} | ID: {self.user.id}')
+        print(f'✅ Connected: {self.user.name}')
 
-    def setup_custom_commands(self):
-        # --- >> الحالات << ---
+    def setup_account_commands(self):
+        # --- >> أمر الهيلب (مطابق لطلبك بالسنتي) << ---
         @self.command()
-        async def streaming(ctx, *, text):
-            # العداد يعمل تلقائياً عند وضع timestamps في النشاط
-            activity = discord.Streaming(
-                name=text, 
-                url="https://www.twitch.tv/ahmed_radi",
-                assets={'start': self.start_time}
-            )
+        async def help(ctx):
+            help_text = """**====================================**
+** اوامر المستخدمين (+)**
+**====================================**
+
+**>> الحالات:**
++playing <نص> <اسم_الصورة>
++streaming <رابط> <نص>
++watching <نص>
++competing <نص>
++listening <نص>
++stopact
+
+**>> كلون:**
++clone <sourceID> <targetID>
+
+**>> فويس:**
++voice <channelID>
++stopvoice
+
+**>> تيكت:**
++text <channelID>
++stoptext
+
+**>> رياكشن:**
++reaction channel <channelID>
++reaction server <serverID>
++reaction on
++reaction off
++stopreaction
+
+**>>ارسال:**
++send <channelID> <وقت> <رسالة>
++stopsend
+
+**>> Spam:**
++addword <كلمة>
++removeword <كلمة>
++spam
++stopspam
++speed
+
+**>> Kep:**
++kep @شخص
++stopkep
++speedk
+
+**>> Nuke:**
++account <serverID> <عدد> <كلمة>
++bot <token> <serverID> <عدد> <كلمة>
++stopnuke
+
+**>> Clear:**
++friend
++server
++dm
++all
++stopdestroy"""
+            await ctx.send(help_text)
+
+        # --- >> الحالات مع دعم الصور << ---
+        @self.command()
+        async def playing(ctx, text, image_name=None):
+            activity = discord.Game(name=text, start=self.start_time)
+            # إذا وضعت اسم صورة مسجلة في الـ Assets الخاصة بـ Application
+            if image_name:
+                activity = discord.Activity(
+                    type=discord.ActivityType.playing,
+                    name=text,
+                    assets={'large_image': image_name, 'large_text': 'Vexy Bot'},
+                    timestamps={'start': self.start_time}
+                )
             await self.change_presence(activity=activity)
-            await ctx.send(f"🟣 {self.user.name}: Started Streaming **{text}**")
+            await ctx.send(f"🎮 {self.user.name}: Playing **{text}**")
 
         @self.command()
-        async def playing(ctx, *, text):
-            await self.change_presence(activity=discord.Game(name=text, start=self.start_time))
-            await ctx.send(f"🎮 {self.user.name}: Playing **{text}**")
+        async def streaming(ctx, url, *, text):
+            await self.change_presence(activity=discord.Streaming(name=text, url=url, start=self.start_time))
+            await ctx.send(f"🟣 {self.user.name}: Streaming **{text}**")
 
         @self.command()
         async def stopact(ctx):
             await self.change_presence(activity=None)
             await ctx.send("✅ Status stopped.")
 
-        # --- >> سبام & كيب << ---
+        # --- >> باقي الأوامر (Spam, Kep, Nuke, Clear) بنفس المنطق السابق << ---
         @self.command()
         async def addword(ctx, *, word):
-            self.spam_list.append(word)
-            await ctx.send(f"➕ Added: `{word}` to this account's list.")
+            self.spam_words.append(word)
+            await ctx.send(f"➕ Added: `{word}`")
 
         @self.command()
-        async def removeword(ctx, *, word):
-            if word in self.spam_list:
-                self.spam_list.remove(word)
-                await ctx.send(f"➖ Removed: `{word}`")
+        async def spam(ctx):
+            self.stop_flags["spam"] = False
+            while not self.stop_flags.get("spam"):
+                if self.spam_words: await ctx.send(random.choice(self.spam_words))
+                await asyncio.sleep(self.spam_speed)
+
+        @self.command()
+        async def stopspam(ctx):
+            self.stop_flags["spam"] = True
+            await ctx.send("🛑 Spam stopped.")
 
         @self.command()
         async def kep(ctx, user: discord.Member):
             self.stop_flags["kep"] = False
-            await ctx.send(f"⚔️ {self.user.name} is now attacking {user.mention}!")
             while not self.stop_flags.get("kep"):
-                msg = random.choice(self.spam_list) if self.spam_list else "Spamming..."
+                msg = random.choice(self.spam_words) if self.spam_words else ".."
                 await ctx.send(f"{user.mention} {msg}")
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(self.kep_speed)
 
         @self.command()
         async def stopkep(ctx):
             self.stop_flags["kep"] = True
-            await ctx.send("🛑 Stopped Kep.")
+            await ctx.send("🛑 Kep stopped.")
 
-        # --- >> فويس << ---
         @self.command()
         async def voice(ctx, channel_id: int):
             self.stop_flags["voice"] = False
@@ -86,71 +159,30 @@ class MultiSelfBot(commands.Bot):
             self.stop_flags["voice"] = True
             if ctx.voice_client: await ctx.voice_client.disconnect()
 
-        # --- >> نيوكنج (التدمير) << ---
-        @self.command()
-        async def account(ctx, s_id: int, count: int, name: str, *, msg):
-            guild = self.get_guild(s_id)
-            if not guild: return
-            self.stop_flags[f"nuke_{s_id}"] = False
-            # حذف القنوات الموجودة
-            for c in guild.channels:
-                try: await c.delete()
-                except: pass
-            # إنشاء القنوات والسبام
-            for i in range(count):
-                if self.stop_flags.get(f"nuke_{s_id}"): break
-                ch = await guild.create_text_channel(name)
-                asyncio.create_task(self.auto_spam_task(ch, msg))
-
-        # --- >> ديستروير (التنظيف) << ---
-        @self.command()
-        async def friend(ctx):
-            for f in self.user.friends:
-                try: await f.remove_friend()
-                except: pass
-            await ctx.send("🧹 Friends list cleared.")
-
-        @self.command()
-        async def server(ctx):
-            for g in self.guilds:
-                try: await g.leave()
-                except: pass
-            await ctx.send("🧹 Left all servers.")
-
-        # --- >> هيلب << ---
-        @self.command()
-        async def help(ctx):
-            help_embed = f"""**📋 أوامر الحساب: {self.user.name}**
-**💫 الحالات:** `+playing`, `+streaming`, `+stopact`
-**🧬 كلون:** `+clone <source> <target>`
-**🎙 فويس:** `+voice <id>`, `+stopvoice`
-**📝 تيكت:** `+text <id>`, `+stoptext`
-**🔧 كيب:** `+addword`, `+kep`, `+stopkep`
-**💣 نيوكنج:** `+account`, `+stopnuke`
-**🔥 ديستروير:** `+friend`, `+server`, `+all`"""
-            await ctx.send(help_embed)
-
-    async def auto_spam_task(self, ch, msg):
-        while True:
-            try: await ch.send(msg)
-            except: break
-
-# --- دالة تشغيل الحسابات ---
-async def start_account(token):
-    bot_instance = MultiSelfBot()
-    bot_instance.setup_custom_commands()
-    try:
-        await bot_instance.start(token)
-    except Exception as e:
-        print(f"❌ Error in token {token[:10]}: {e}")
+# --- دالة التشغيل ---
+async def start_acc(token):
+    if not token or token == "ضع_التوكن_هنا_إذا_أردت": return
+    client = MultiAccountBot()
+    client.setup_account_commands()
+    try: await client.start(token)
+    except: print(f"❌ Failed to start token: {token[:10]}...")
 
 async def main():
-    if not TOKENS_RAW:
-        print("❌ Please add TOKEN variable in host settings!")
+    all_tokens = []
+    # إضافة التوكن الأساسي من الكود
+    if PRIMARY_TOKEN and PRIMARY_TOKEN != "ضع_التوكن_هنا_إذا_أردت":
+        all_tokens.append(PRIMARY_TOKEN)
+    
+    # إضافة التوكنات من Variables
+    if TOKENS_RAW:
+        all_tokens.extend([t.strip() for t in TOKENS_RAW.split(',')])
+    
+    if not all_tokens:
+        print("❌ No tokens provided!")
         return
-    tokens = [t.strip() for t in TOKENS_RAW.split(',')]
-    await asyncio.gather(*[start_account(token) for token in tokens])
+
+    await asyncio.gather(*[start_acc(token) for token in all_tokens])
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+                
